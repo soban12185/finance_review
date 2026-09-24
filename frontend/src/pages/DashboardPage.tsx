@@ -68,13 +68,15 @@ export default function DashboardPage() {
   const isEmpty = (data?.stats.total_transactions ?? 0) === 0;
 
   const kpis =
-    overview && {
-      revenue: { cents: overview.lines["revenue"] ?? 0, hint: "Food, beverage, catering, delivery" },
-      grossProfit: { cents: overview.lines["gross_profit"] ?? 0, hint: "Revenue less COGS" },
-      operatingProfit: { cents: overview.lines["operating_profit"] ?? 0, hint: "After payroll and operating expenses" },
-      netCash: { cents: overview.net_cash_cents, hint: "Net of refunds and payouts" },
-      pendingReview: { cents: overview.pending_review_count * 100, hint: "Need a reviewer decision" },
-    };
+    overview?.lines
+      ? {
+          revenue: { cents: overview.lines["revenue"] ?? 0, hint: "Food, beverage, catering, delivery" },
+          grossProfit: { cents: overview.lines["gross_profit"] ?? 0, hint: "Revenue less COGS" },
+          operatingProfit: { cents: overview.lines["operating_profit"] ?? 0, hint: "After payroll and operating expenses" },
+          netCash: { cents: overview.net_cash_cents ?? 0, hint: "Net of refunds and payouts" },
+          pendingReview: { cents: (overview.pending_review_count ?? 0) * 100, hint: "Need a reviewer decision" },
+        }
+      : undefined;
 
   if (error) {
     return (
