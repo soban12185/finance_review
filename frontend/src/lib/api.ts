@@ -8,15 +8,32 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     ...(body && !(body instanceof FormData) ? { "Content-Type": "application/json" } : {}),
     ...((options?.headers as Record<string, string>) ?? {}),
   };
-  const res = await fetch(`${BASE}${path}`, { ...options, headers });
+  const url = `${BASE}${path}`;
+  let res: Response;
+  try {
+    res = await fetch(url, { ...options, headers });
+  } catch (err) {
+    // Network-level failure (DNS/connection, TLS, or CORS block) has no status/body.
+    console.error(
+      `FINZ API network failure: ${options?.method ?? "GET"} ${url}`,
+      err instanceof Error ? err.message : String(err),
+    );
+    throw err;
+  }
   if (!res.ok) {
     let detail = `${res.status} ${res.statusText}`;
     try {
-      const body = await res.json();
-      if (typeof body?.detail === "string") detail = body.detail;
-      else detail = JSON.stringify(body?.detail ?? body);
+      const resBody = await res.json();
+      if (typeof resBody?.detail === "string") detail = resBody.detail;
+      else detail = JSON.stringify(resBody?.detail ?? resBody);
+      console.error(
+        `FINZ API error: ${options?.method ?? "GET"} ${url} -> ${res.status}`,
+        resBody,
+      );
     } catch {
-      /* keep status fallback */
+      console.error(
+        `FINZ API error: ${options?.method ?? "GET"} ${url} -> ${res.status} ${res.statusText} (non-JSON body)`,
+      );
     }
     throw new Error(detail);
   }
