@@ -13,6 +13,10 @@ services:
     startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
+      # Paste your Postgres connection string here (e.g. from Neon). Kept as a
+      # Render secret - never committed to the repo.
+      - key: DATABASE_URL
+        sync: false                 # prompt at deploy time (your Neon URL)
       - key: GROQ_API_KEY
         sync: false                 # optional; rules-only classification works without it
       - key: ENABLE_LLM_CLASSIFICATION
@@ -29,11 +33,3 @@ services:
         value: sample_data/NYC Restaurant Co. - Raw Transactions.xlsx
       - key: SAMPLE_DATASET_PATH
         value: sample_data/NYC Restaurant Co. - Raw Transactions.xlsx
-
-# Render provisions a linked free Postgres for the service and injects its
-# connection string as DATABASE_URL automatically (no manual DB setup needed).
-databases:
-  - name: finz-db
-    plan: free
-    databaseName: finz
-    user: finz
