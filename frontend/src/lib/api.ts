@@ -1,4 +1,6 @@
-const BASE = import.meta.env.VITE_API_BASE ?? "";
+const BASE = (import.meta.env.VITE_API_BASE ?? "").replace(/\/+$/, "");
+
+export const API_BASE: string = BASE;
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const body = options?.body;

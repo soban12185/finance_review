@@ -69,8 +69,11 @@ class Settings(BaseSettings):
     variance_materiality_abs_cents: int = 50_000  # $500.00
 
     # --- CORS ------------------------------------------------------------------
-    # Comma separated list of allowed origins, e.g. "http://localhost:5173"
+    # Comma separated list of allowed origins, e.g. "http://localhost:5173".
     cors_origins: List[str] = ["http://localhost:5173", "http://localhost:3000"]
+    # Exact production frontend origin (e.g. the deployed Vercel domain). Added to
+    # the allowed origins so the deployed UI can call this API cross-origin.
+    frontend_url: str | None = None
 
     # --- Data / Seeding --------------------------------------------------------
     # Optional path to an xlsx dataset that is auto-ingested on startup when the
@@ -112,7 +115,12 @@ class Settings(BaseSettings):
 
     @property
     def cors_origin_list(self) -> List[str]:
-        return self.cors_origins
+        origins = list(self.cors_origins)
+        if self.frontend_url:
+            url = (self.frontend_url or "").strip().rstrip("/")
+            if url and url not in origins:
+                origins.append(url)
+        return origins
 
     @property
     def review_threshold(self) -> float:

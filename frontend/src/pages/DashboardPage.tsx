@@ -4,7 +4,7 @@ import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Too
 import { Card, CardHeader } from "../components/Card";
 import ImportCard from "../components/ImportCard";
 import { KpiCard, MonthSelector, StateBadge } from "../components/ui";
-import { api } from "../lib/api";
+import { api, API_BASE } from "../lib/api";
 import { monthLabel, money } from "../lib/format";
 import type { DashboardData } from "../lib/types";
 
@@ -80,6 +80,9 @@ export default function DashboardPage() {
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 text-red-700 px-4 py-6 text-sm">
         Failed to load dashboard: {error}
+        <div className="mt-2 text-red-500 text-xs">
+          API base: <code className="bg-red-100 px-1 rounded">{API_BASE || "(same-origin)"}</code>
+        </div>
         <div className="mt-2 text-red-500 text-xs">
           Is the backend running? Start it with <code className="bg-red-100 px-1 rounded">docker compose up -d backend</code>.
         </div>

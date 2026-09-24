@@ -23,10 +23,13 @@ services:
         value: "true"
       - key: GROQ_MODEL
         value: "openai/gpt-oss-120b"
-      # "*" allows the Vercel frontend origin to call the API. Tighten this to
-      # your exact frontend URL later (e.g. https://app.vercel.app) if desired.
+      # "*" allows the Vercel frontend origin to call the API. Prefer setting
+      # FRONTEND_URL to your exact production frontend URL (e.g. the Vercel
+      # domain) - the app adds it to the allowed origins alongside this list.
       - key: CORS_ORIGINS
         value: "*"
+      - key: FRONTEND_URL
+        sync: false                 # exact frontend origin, e.g. https://app.vercel.app
       # Sample dataset lives inside backend/sample_data, so "Load sample dataset"
       # and first-boot auto-seeding work without any volume mounts.
       - key: SEED_DATASET_PATH
