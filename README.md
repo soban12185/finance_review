@@ -128,12 +128,25 @@ docker compose up --build -d
 ```
 
 The dataset lives in `data\` and is mounted read-only into the backend, ready
-to be ingested from the UI or script:
+to be ingested from the UI, the script, or the API:
 
 ```bash
 docker compose exec backend sh -c \
   'python scripts/ingest_dataset.py "/data/NYC Restaurant Co. - Raw Transactions.xlsx"'
 ```
+
+No CLI needed: the **Dashboard has an "Import dataset" card** — drag & drop or
+pick an `.xlsx` / `.xlsm` / `.csv` file (max 5 MB), or click **"Load sample
+dataset"** to pull the bundled workbook from the server. Both routes return the
+same summary (rows read / inserted / duplicates / failed, row-level problems,
+and how many items were sent to the review queue).
+
+API endpoints:
+
+* `POST /api/ingest/upload` — multipart upload (also at legacy `POST /api/ingest`).
+* `POST /api/ingest/sample` — load the sample dataset configured via
+  `SEED_DATASET_PATH` / `SAMPLE_DATASET_PATH` (in docker compose:
+  `/data/NYC Restaurant Co. - Raw Transactions.xlsx`).
 
 ## Local development (no Docker for the app code)
 
@@ -157,31 +170,35 @@ npm install
 npm run dev          # http://localhost:5173 (proxies /api to :8000)
 ```
 
-## Guided demo (10 steps)
+## Guided demo (11 steps)
 
-1. **Dashboard** — see the "AI-Native Financial Review" explainer: AI-Powered /
+1. **Import** — on the Dashboard, use the "Import dataset" card: drop a
+   workbook, or click **"Load sample dataset"** for the bundled data. See rows
+   read / inserted / duplicates / failed, any row-level problems, and how many
+   items were flagged for review — all without touching a terminal.
+2. **Dashboard** — see the "AI-Native Financial Review" explainer: AI-Powered /
    Deterministic Engine / Human-in-the-loop, plus the pipeline strip.
-2. **How It Works** — open the architecture page: 8-step processing pipeline
+3. **How It Works** — open the architecture page: 8-step processing pipeline
    with deterministic/AI/human badges, the four pillars (AI · Deterministic ·
    Retrieval · Human), where AI is used vs not, and why there is no vector RAG.
-3. **Transactions** — filter the 181 classified rows and check the source badge
+4. **Transactions** — filter the 181 classified rows and check the source badge
    (Rule / AI / Manual), confidence % and review flags on each row.
-4. **Review Queue** — open any pending item: you'll see *why* it was flagged
+5. **Review Queue** — open any pending item: you'll see *why* it was flagged
    (review sources + reasons) and the system's suggested action. Approve,
    reclassify or mark non-P&L.
-5. **P&L** — click a line to drill down to the exact transactions; computed
+6. **P&L** — click a line to drill down to the exact transactions; computed
    lines are marked; the page declares the integer-cent engine.
-6. **Variance** — compare two months, expand a material line, and inspect the
+7. **Variance** — compare two months, expand a material line, and inspect the
    traceable driver transactions.
-7. **AI Analyst** — ask "Why did operating profit change between February and
+8. **AI Analyst** — ask "Why did operating profit change between February and
    March?". Watch the pipeline strip (tool selection → SQL retrieval /
    deterministic calculation → evidence → explanation).
-8. **Evidence panel** — the analyst's answer cites tool names, months and
+9. **Evidence panel** — the analyst's answer cites tool names, months and
    transaction ids; click any id to jump to that transaction. Evidence is only
    ever what the tools actually returned.
-9. **Determinism check** — re-run a P&L or variance calculation: identical
-   numbers every time. The LLM only rewords explanations, never the totals.
-10. **Tests** — run `pytest` (below): the suite locks in the grounding rules,
+10. **Determinism check** — re-run a P&L or variance calculation: identical
+    numbers every time. The LLM only rewords explanations, never the totals.
+11. **Tests** — run `pytest` (below): the suite locks in the grounding rules,
     evidence collection, review triggers and deterministic engine, so an
     AI-native regression fails the build.
 
@@ -189,7 +206,7 @@ npm run dev          # http://localhost:5173 (proxies /api to :8000)
 
 ```bash
 cd backend
-.\.venv\Scripts\python -m pytest -q        # 110 tests, in-memory SQLite, no network
+.\.venv\Scripts\python -m pytest -q        # 122 tests, in-memory SQLite, no network
 ```
 
 ## Dataset
@@ -216,10 +233,11 @@ backend/
     models/  schemas/  repositories/  core/  db/
   alembic/                 # initial schema + category seed migration
   scripts/                 # ingest_dataset.py, summary.py
-  tests/                   # 95 tests incl. API-level integration
+  tests/                   # 122 tests incl. API-level integration
 frontend/
   src/pages/               # Dashboard, Transactions, Review Queue, P&L,
                            # Variance, AI Analyst, How It Works (architecture)
-  src/components/ src/lib/
+  src/components/          # Card, ImportCard (upload + sample dataset), ui
+  src/lib/
 docker-compose.yml         # db + backend + frontend
 ```

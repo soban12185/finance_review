@@ -99,6 +99,8 @@ export const api = {
   ingest: (file: File, filename?: string) => {
     const form = new FormData();
     form.append("file", file, filename ?? file.name);
-    return request("/api/ingest", { method: "POST", body: form });
+    return request<import("./types").IngestSummary>("/api/ingest/upload", { method: "POST", body: form });
   },
+
+  ingestSample: () => request<import("./types").IngestSummary>("/api/ingest/sample", { method: "POST" }),
 };

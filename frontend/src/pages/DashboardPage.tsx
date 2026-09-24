@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardHeader } from "../components/Card";
+import ImportCard from "../components/ImportCard";
 import { KpiCard, MonthSelector, StateBadge } from "../components/ui";
 import { api } from "../lib/api";
 import { monthLabel, money } from "../lib/format";
@@ -25,6 +26,7 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [month, setMonth] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     api
@@ -34,7 +36,12 @@ export default function DashboardPage() {
         setMonth((cur) => cur || d.selected_month || "");
       })
       .catch((e: Error) => setError(e.message));
-  }, [month]);
+  }, [month, reload]);
+
+  function onImported() {
+    setMonth("");
+    setReload((r) => r + 1);
+  }
 
   const months = useMemo(() => (data?.months ?? []).map((m) => m.month), [data]);
   const trend = useMemo(
@@ -58,6 +65,7 @@ export default function DashboardPage() {
   );
 
   const overview = data?.overview;
+  const isEmpty = (data?.stats.total_transactions ?? 0) === 0;
 
   const kpis =
     overview && {
@@ -148,7 +156,19 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      <div className="grid grid-cols-2 xl:grid-cols-5 gap-4">
+      <ImportCard onImported={onImported} />
+
+      {isEmpty ? (
+        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-6 py-12 text-center">
+          <div className="text-sm font-medium text-slate-700">No transactions in the database yet</div>
+          <div className="text-xs text-slate-500 mt-1 max-w-lg mx-auto">
+            Drop a workbook above (or use "Load sample dataset") to populate the dashboard, P&amp;L, variance analysis
+            and the review queue.
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 xl:grid-cols-5 gap-4">
         <KpiCard label="Revenue" cents={kpis?.revenue?.cents ?? 0} hint={kpis?.revenue?.hint} />
         <KpiCard label="Gross Profit" cents={kpis?.grossProfit.cents ?? 0} hint={kpis?.grossProfit.hint} />
         <KpiCard label="Operating Profit" cents={kpis?.operatingProfit.cents ?? 0} hint={kpis?.operatingProfit.hint} />
@@ -227,7 +247,9 @@ export default function DashboardPage() {
             Resolve classification flags →
           </Link>
         </div>
-      </div>
+        </div>
+        </>
+      )}
     </div>
   );
 }

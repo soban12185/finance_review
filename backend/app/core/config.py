@@ -76,6 +76,9 @@ class Settings(BaseSettings):
     # Optional path to an xlsx dataset that is auto-ingested on startup when the
     # transactions table is empty (used to make a fresh deployment demo-ready).
     seed_dataset_path: str | None = None
+    # Optional path to the bundled sample dataset served by POST /api/ingest/sample.
+    # Falls back to seed_dataset_path when unset.
+    sample_dataset_path: str | None = None
 
     # --- Misc --------------------------------------------------------------------
     log_level: str = "INFO"

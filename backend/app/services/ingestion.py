@@ -22,9 +22,11 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.errors import IngestionError
+from app.core.constants import ReviewStatus
 from app.core.logging import get_logger
 from app.financial.money import value_to_cents
 from app.models.audit_event import AuditEvent
+from app.models.review_item import ReviewItem
 from app.models.transaction import IngestionError as IngestionErrorRow
 from app.models.transaction import IngestionRun, Transaction
 from app.services.classification import build_classification, ensure_categories, persist_classification
@@ -67,6 +69,13 @@ class IngestionSummary:
     run_id: int | None = None
     message: str = ""
     problems: list[RowProblem] = field(default_factory=list)
+    # Extended reporting for the upload/sample API (kept alongside the original
+    # fields so existing callers keep working).
+    rows_read: int = 0
+    rows_failed: int = 0
+    rows_inserted: int | None = None
+    rows_duplicate_skipped: int | None = None
+    review_queue_count: int = 0
 
 
 def _raw_amount_str(value: object) -> str:
@@ -107,14 +116,55 @@ def parse_workbook(data: bytes) -> tuple[list[RawRow], list[RowProblem]]:
         raise IngestionError("Workbook contains no rows.", detail={"expected_columns": list(REQUIRED_COLUMNS)}) from None
 
     header = [str(h).strip() if h is not None else "" for h in header]
+    return _normalize_rows(rows_iter, header, start_row=2)
+
+
+def parse_csv(data: bytes) -> tuple[list[RawRow], list[RowProblem]]:
+    """Parse UTF-8 CSV bytes into the same normalized rows / problems.
+
+    Uses the exact same header validation and per-row normalization as the
+    workbook parser, so a CSV export of a workbook imports identically.
+    """
+    import csv
+    import io
+
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise IngestionError("Could not read CSV: the file must be UTF-8 encoded.") from exc
+
+    reader = csv.reader(io.StringIO(text))
+    try:
+        header = next(reader)
+    except StopIteration:
+        raise IngestionError("CSV contains no rows.", detail={"expected_columns": list(REQUIRED_COLUMNS)}) from None
+
+    header = [str(h).strip() if h is not None else "" for h in header]
+    return _normalize_rows(reader, header, start_row=2)
+
+
+def parse_file(data: bytes, filename: str) -> tuple[list[RawRow], list[RowProblem]]:
+    """Dispatch on the file extension to the right parser."""
+    if (filename or "").lower().endswith(".csv"):
+        return parse_csv(data)
+    return parse_workbook(data)
+
+
+def _normalize_rows(
+    rows_iter,
+    header: list[str],
+    *,
+    start_row: int,
+) -> tuple[list[RawRow], list[RowProblem]]:
+    """Turn raw rows into normalized RawRows, capturing every per-row problem."""
     validate_headers(header)
     col = {name: header.index(name) for name in REQUIRED_COLUMNS}
 
     rows: list[RawRow] = []
     problems: list[RowProblem] = []
 
-    for idx, raw in enumerate(rows_iter, start=2):
-        if raw is None or all(v is None for v in raw):
+    for idx, raw in enumerate(rows_iter, start=start_row):
+        if raw is None or all(v is None or str(v).strip() == "" for v in raw):
             continue
         transaction_id = str(raw[col["Transaction ID"]]).strip() if raw[col["Transaction ID"]] is not None else ""
 
@@ -210,15 +260,18 @@ def ingest_workbook(db: Session, filename: str, data: bytes) -> IngestionSummary
     db.add(run)
     db.commit()
 
-    rows, problems = parse_workbook(data)
+    rows, parse_problems = parse_file(data, filename)
     # Persist parse problems immediately so they are not lost.
-    for p in problems:
+    for p in parse_problems:
         _save_row_problem(db, run.id, p)
     run.total_rows = len(rows)
 
     inserted = 0
     duplicates = 0
     potential = 0
+    insert_failed = 0
+    inserted_ids: list[str] = []
+    all_problems: list[RowProblem] = list(parse_problems)
 
     existing_ids = {
         tid for (tid,) in db.query(Transaction.transaction_id).all()
@@ -230,47 +283,57 @@ def ingest_workbook(db: Session, filename: str, data: bytes) -> IngestionSummary
         for row in rows:
             if row.transaction_id in existing_ids:
                 duplicates += 1
-                _save_row_problem(db, run.id, RowProblem(
+                dup_problem = RowProblem(
                     row_number=row.row_number,
                     transaction_id=row.transaction_id,
                     error_type="duplicate_transaction_id",
                     message="Transaction ID already exists - skipped (idempotent import).",
                     row_data=row.raw_amount,
-                ))
+                )
+                _save_row_problem(db, run.id, dup_problem)
+                all_problems.append(dup_problem)
                 continue
 
             fingerprint = _fingerprint(row)
             other = existing_fingerprints.get(fingerprint)
             if other is not None and other != row.transaction_id:
                 potential += 1
-                _save_row_problem(db, run.id, RowProblem(
+                near_dup_problem = RowProblem(
                     row_number=row.row_number,
                     transaction_id=row.transaction_id,
                     error_type="potential_duplicate",
                     message=f"Exact content duplicate of {other} (same date/description/counterparty/amount) - skipped.",
                     row_data=None,
-                ))
+                )
+                _save_row_problem(db, run.id, near_dup_problem)
+                all_problems.append(near_dup_problem)
                 continue
 
             try:
                 _classify_and_persist(db, row)
                 inserted += 1
+                inserted_ids.append(row.transaction_id)
                 existing_ids.add(row.transaction_id)
                 existing_fingerprints[fingerprint] = row.transaction_id
             except Exception as exc:  # noqa: BLE001 - row-scoped failure isolation
                 logger.exception("Failed to insert row %s", row.transaction_id)
-                _save_row_problem(db, run.id, RowProblem(
+                insert_failed += 1
+                fail_problem = RowProblem(
                     row_number=row.row_number,
                     transaction_id=row.transaction_id,
                     error_type="insert_failed",
                     message=f"Database failure while inserting: {exc}",
                     row_data=None,
-                ))
+                )
+                _save_row_problem(db, run.id, fail_problem)
+                all_problems.append(fail_problem)
     finally:
         err_count = (
             db.query(func.count(IngestionErrorRow.id))
             .filter(IngestionErrorRow.run_id == run.id).scalar() or 0
         )
+        review_queue_count = _count_review_queue_for(db, inserted_ids)
+        rows_read = len(rows) + len(parse_problems)
         run.status = "completed"
         run.inserted = inserted
         run.duplicates_skipped = duplicates
@@ -291,10 +354,12 @@ def ingest_workbook(db: Session, filename: str, data: bytes) -> IngestionSummary
             new_value={
                 "filename": filename,
                 "source_hash": digest,
+                "rows_read": rows_read,
                 "inserted": inserted,
                 "duplicates_skipped": duplicates,
-                "errors": err_count,
                 "potential_duplicates": potential,
+                "rows_failed": len(parse_problems) + insert_failed,
+                "review_queue_count": review_queue_count,
             },
             actor="system",
         ))
@@ -310,9 +375,30 @@ def ingest_workbook(db: Session, filename: str, data: bytes) -> IngestionSummary
         potential_duplicates=potential,
         run_id=run.id,
         message=run.message,
-        problems=problems,
+        problems=all_problems,
+        rows_read=rows_read,
+        rows_failed=len(parse_problems) + insert_failed,
+        rows_inserted=inserted,
+        rows_duplicate_skipped=duplicates + potential,
+        review_queue_count=review_queue_count,
     )
     return summary
+
+
+def _count_review_queue_for(db: Session, transaction_ids: list[str]) -> int:
+    """Count pending review items created for the transactions in an import."""
+    if not transaction_ids:
+        return 0
+    count = (
+        db.query(func.count(ReviewItem.id))
+        .join(Transaction, ReviewItem.transaction_id == Transaction.id)
+        .filter(
+            Transaction.transaction_id.in_(transaction_ids),
+            ReviewItem.status == ReviewStatus.PENDING.value,
+        )
+        .scalar() or 0
+    )
+    return int(count)
 
 
 def _save_row_problem(db: Session, run_id: int, p: RowProblem) -> None:

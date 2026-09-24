@@ -29,6 +29,8 @@ services:
       GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
       ENABLE_LLM_CLASSIFICATION: ${ENABLE_LLM_CLASSIFICATION:-true}
       CORS_ORIGINS: '["http://localhost:5173","http://localhost:3000"]'
+      SEED_DATASET_PATH: /data/NYC Restaurant Co. - Raw Transactions.xlsx
+      SAMPLE_DATASET_PATH: /data/NYC Restaurant Co. - Raw Transactions.xlsx
     ports:
       - "8000:8000"
     volumes:

@@ -137,6 +137,111 @@ def test_ingest_api_rejects_bad_extension(client):
     assert r.status_code == 422
 
 
+def test_ingest_upload_endpoint(client):
+    r = client.post("/api/ingest/upload", files={
+        "file": ("raw.xlsx", make_workbook_bytes(SAMPLE_ROWS), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert body["rows_read"] == len(SAMPLE_ROWS)
+    assert body["rows_inserted"] == len(SAMPLE_ROWS)
+    assert body["rows_duplicate_skipped"] == 0
+    assert body["rows_failed"] == 0
+    assert body["review_queue_count"] >= 0
+    assert isinstance(body["run_id"], int)
+    assert body["problems"] == []
+
+
+def test_ingest_upload_accepts_csv(client):
+    import csv
+    import io
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    cols = ["Transaction ID", "Date", "Description", "Counterparty", "Amount", "Method"]
+    w.writerow(cols)
+    w.writerows(r[:] for r in SAMPLE_ROWS)
+    r = client.post(
+        "/api/ingest/upload",
+        files={"file": ("raw.csv", buf.getvalue().encode("utf-8"), "text/csv")},
+    )
+    assert r.status_code == 200
+    assert r.json()["rows_inserted"] == len(SAMPLE_ROWS)
+
+
+def test_ingest_upload_rejects_oversize(client):
+    big = make_workbook_bytes(SAMPLE_ROWS) + b"0" * (5 * 1024 * 1024 + 1)
+    r = client.post("/api/ingest/upload", files={"file": ("big.xlsx", big, "application/octet-stream")})
+    assert r.status_code == 422
+    assert "5 MB" in r.json()["error"]["message"]
+
+
+def test_ingest_upload_rejects_unreadable_workbook(client):
+    r = client.post("/api/ingest/upload", files={"file": ("bad.xlsx", b"this is not an xlsx", "application/octet-stream")})
+    assert r.status_code == 422
+    assert "Could not read" in r.json()["error"]["message"]
+
+
+def test_ingest_upload_rejects_missing_columns(client):
+    import csv
+    import io
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Description", "Amount"])
+    w.writerow(["x", 10])
+    r = client.post(
+        "/api/ingest/upload",
+        files={"file": ("bad.csv", buf.getvalue().encode("utf-8"), "text/csv")},
+    )
+    assert r.status_code == 422
+    assert "missing required columns" in r.json()["error"]["message"]
+
+
+def test_ingest_sample_endpoint(client, tmp_path, monkeypatch):
+    class _FakeSettings:
+        sample_dataset_path = str(tmp_path / "sample.xlsx")
+        seed_dataset_path = None
+
+    sample = tmp_path / "sample.xlsx"
+    sample.write_bytes(make_workbook_bytes(SAMPLE_ROWS))
+    monkeypatch.setattr("app.api.ingest.get_settings", lambda: _FakeSettings())
+
+    r = client.post("/api/ingest/sample")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["rows_inserted"] == len(SAMPLE_ROWS)
+    assert body["rows_failed"] == 0
+    assert body["filename"].endswith("sample.xlsx")
+
+    # idempotent on a second click
+    r2 = client.post("/api/ingest/sample")
+    assert r2.status_code == 200
+    assert r2.json()["rows_inserted"] == 0
+    assert r2.json()["rows_duplicate_skipped"] == len(SAMPLE_ROWS)
+
+
+def test_ingest_sample_not_configured(client, monkeypatch):
+    class _NoSample:
+        sample_dataset_path = None
+        seed_dataset_path = None
+
+    monkeypatch.setattr("app.api.ingest.get_settings", lambda: _NoSample())
+    r = client.post("/api/ingest/sample")
+    assert r.status_code == 422
+    assert "not configured" in r.json()["error"]["message"]
+
+
+def test_ingest_sample_missing_file(client, tmp_path, monkeypatch):
+    class _Missing:
+        sample_dataset_path = str(tmp_path / "nope.xlsx")
+        seed_dataset_path = None
+
+    monkeypatch.setattr("app.api.ingest.get_settings", lambda: _Missing())
+    r = client.post("/api/ingest/sample")
+    assert r.status_code == 404
+
+
 def test_categories_api(client):
     r = client.get("/api/categories")
     assert r.status_code == 200

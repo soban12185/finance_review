@@ -1,12 +1,23 @@
 """Excel ingestion: validation, normalization, dedupe, idempotency."""
+import csv
+import io
+
 import pytest
 
 from app.core.errors import IngestionError
 from app.models.transaction import IngestionRun, Transaction
-from app.services.ingestion import ingest_workbook, parse_workbook, validate_headers
+from app.services.ingestion import ingest_workbook, parse_csv, parse_file, parse_workbook, validate_headers
 from tests.conftest import SAMPLE_ROWS, make_workbook_bytes
 
 HEADERS = ["Transaction ID", "Date", "Description", "Counterparty", "Amount", "Method"]
+
+
+def make_csv_bytes(rows):
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(HEADERS)
+    w.writerows(rows)
+    return buf.getvalue().encode("utf-8")
 
 
 def test_validate_headers_ok():
@@ -96,8 +107,6 @@ def test_ingest_tracks_errors_in_run(db_session):
 
 
 def test_empty_workbook_rejected(db_session):
-    import io
-
     import openpyxl
 
     wb = openpyxl.Workbook()
@@ -106,6 +115,55 @@ def test_empty_workbook_rejected(db_session):
     wb.save(buf)
     with pytest.raises(IngestionError):
         parse_workbook(buf.getvalue())
+
+
+def test_parse_csv_normalizes():
+    rows, problems = parse_csv(make_csv_bytes(SAMPLE_ROWS))
+    assert len(rows) == len(SAMPLE_ROWS)
+    assert not problems
+    assert rows[0].transaction_id == "T5001"
+    assert rows[0].amount_cents == 120000
+    assert rows[0].date.day == 8
+
+
+def test_parse_csv_captures_row_errors():
+    bad = [SAMPLE_ROWS[0][:], SAMPLE_ROWS[1][:]]
+    bad[1][1] = "not-a-date"
+    rows, problems = parse_csv(make_csv_bytes(bad))
+    assert len(rows) == 1
+    assert problems[0].error_type == "invalid_date"
+
+
+def test_parse_file_dispatches_on_extension():
+    data = make_csv_bytes(SAMPLE_ROWS)
+    rows, problems = parse_file(data, "sample.CSV")
+    assert len(rows) == len(SAMPLE_ROWS)
+    assert not problems
+    with pytest.raises(IngestionError):
+        parse_file(b"not a workbook at all", "sample.docx")
+
+
+def test_ingest_csv_via_filename(db_session):
+    summary = ingest_workbook(db_session, "sample.csv", make_csv_bytes(SAMPLE_ROWS))
+    assert summary.inserted == len(SAMPLE_ROWS)
+    assert db_session.query(Transaction).count() == len(SAMPLE_ROWS)
+    from app.models.classification import Classification
+    assert db_session.query(Classification).count() == len(SAMPLE_ROWS)
+
+
+def test_ingest_summary_reports_extended_counts(db_session):
+    bad = [SAMPLE_ROWS[0][:], ["T9000", "bad-date", "x", "cp", 10, "ACH"]]
+    summary = ingest_workbook(db_session, "mixed.xlsx", make_workbook_bytes(bad))
+    assert summary.rows_read == len(bad)
+    assert summary.rows_failed == 1
+    assert summary.rows_inserted == 1
+    assert summary.rows_duplicate_skipped == 0
+    assert summary.review_queue_count >= 0
+    # duplicate re-import tracks skipped duplicates + zero review traffic
+    again = ingest_workbook(db_session, "mixed.xlsx", make_workbook_bytes(bad))
+    assert again.rows_inserted == 0
+    assert again.rows_duplicate_skipped == 1
+    assert again.review_queue_count == 0
 
 
 def _helper():

@@ -79,6 +79,31 @@ export interface ReviewList {
   items: ReviewItem[];
 }
 
+export interface IngestRowProblem {
+  row_number: number;
+  transaction_id: string | null;
+  error_type: string;
+  message: string;
+}
+
+export interface IngestSummary {
+  filename: string;
+  status: string;
+  message: string;
+  run_id: number;
+  rows_read: number;
+  rows_inserted: number;
+  rows_duplicate_skipped: number;
+  rows_failed: number;
+  review_queue_count: number;
+  total_rows: number;
+  inserted: number;
+  duplicates_skipped: number;
+  errors: number;
+  potential_duplicates: number;
+  problems: IngestRowProblem[];
+}
+
 export interface Category {
   code: string;
   name: string;
