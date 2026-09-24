@@ -27,9 +27,34 @@ configure_logging()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting %s v%s", settings.app_name, settings.app_version)
+    _run_migrations()
     _bootstrap()
     yield
     logger.info("Shutdown complete")
+
+
+def _run_migrations() -> None:
+    """Apply pending Alembic migrations before any bootstrap code touches the schema.
+
+    ``alembic upgrade head`` is idempotent (it consults ``alembic_version`` and
+    applies only missing revisions), so running it on every startup is safe and
+    never drops or truncates existing data. This guarantees tables such as
+    ``categories`` exist before ``_bootstrap()`` calls ``ensure_categories()``,
+    even when the platform start command does not run Alembic itself.
+    """
+    from alembic import command
+    from alembic.config import Config
+
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cfg = Config(os.path.join(backend_dir, "alembic.ini"))
+    cfg.set_main_option("script_location", os.path.join(backend_dir, "alembic"))
+    try:
+        command.upgrade(cfg, "head")
+        logger.info("Alembic migrations up to date.")
+    except OperationalError:
+        logger.warning("Database not reachable at startup - skipping migrations (continuing).")
+    except Exception:  # noqa: BLE001 - never block startup on migration issues
+        logger.exception("Alembic migration step failed (continuing; app may be degraded).")
 
 
 def _bootstrap() -> None:
