@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+backend/.coverage
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/*.tsbuildinfo
+
+# Environment / secrets
+.env
+.env.local
+*.env
+!**/.env.example
+
+# Duplicate dataset kept outside data/ (the canonical copy lives in data/)
+/NYC Restaurant Co. - Raw Transactions.xlsx
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Logs / scratch
+*.log
+logs/
+
+# Docker
+finz_pgdata/
