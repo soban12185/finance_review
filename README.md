@@ -146,7 +146,41 @@ API endpoints:
 * `POST /api/ingest/upload` — multipart upload (also at legacy `POST /api/ingest`).
 * `POST /api/ingest/sample` — load the sample dataset configured via
   `SEED_DATASET_PATH` / `SAMPLE_DATASET_PATH` (in docker compose:
-  `/data/NYC Restaurant Co. - Raw Transactions.xlsx`).
+  `/app/sample_data/NYC Restaurant Co. - Raw Transactions.xlsx`, baked into the
+  image; on Render/cloud: `sample_data/...` next to `requirements.txt`).
+
+## Deploy to production (free tier: Render + Vercel + Neon)
+
+The repo ships the pieces needed for a free cloud deployment:
+
+* `backend/sample_data/` — the sample workbook is **baked into the repo**, so
+  "Load sample dataset" and first-boot seeding work on any host with no volumes.
+* `render.yaml` — Render Blueprint that provisions the free backend service.
+* `frontend/vercel.json` — SPA rewrites so deep links work on Vercel's free tier.
+
+Steps:
+
+1. **Database (Neon, free forever)** — create a project at
+   https://neon.tech/projects, copy the connection string
+   (`postgresql://user:pass@ep-…neon.tech/db?sslmode=require`). No need to
+   change the scheme — the app normalises `postgresql://` to the psycopg driver
+   automatically.
+2. **Backend (Render)** — push this repo to GitHub, then
+   *New + → Blueprint* on https://render.com, pick the repo, and click
+   *Apply*. Enter the **Neon DB URL** for `DATABASE_URL` and (optional) your
+   `GROQ_API_KEY`. The service auto-runs migrations (`alembic upgrade head`),
+   seeds the sample data on an empty database, and exposes `/health`.
+3. **Frontend (Vercel)** — in https://vercel.com/new import the same repo;
+   **Root Directory: `frontend`**, framework auto-detected as Vite. Add an
+   environment variable (**Production + Preview**):
+   `VITE_API_BASE = https://<your-backend>.onrender.com`, then Deploy.
+4. **Check** — open the Vercel URL, hit **Load sample dataset**, and confirm
+   the Dashboard/P&L/review queue populate.
+
+Free-tier caveats: Render's free web service sleeps after ~15 minutes idle and
+cold-starts in ~50 s on the next request; Neon free plans cap at 0.5 GB storage.
+`CORS_ORIGINS` is set to `*` in `render.yaml` for the demo — tighten it to your
+exact Vercel origin by replacing `*` with your app URL.
 
 ## Local development (no Docker for the app code)
 

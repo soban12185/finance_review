@@ -1,0 +1,33 @@
+# Render Blueprint - FINZ backend (free tier).
+# Deploy by importing this repo in Render: New + → Blueprint (pick the repo).
+# You fill in DATABASE_URL (e.g. a free Neon Postgres connection string) and
+# GROQ_API_KEY (optional - the app runs rules-only without it).
+services:
+  - type: web
+    name: finz-backend
+    runtime: python
+    rootDir: backend
+    plan: free
+    autoDeploy: true
+    buildCommand: pip install -r requirements.txt
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false                 # prompt at deploy time (Neon/Render/any Postgres URL)
+      - key: GROQ_API_KEY
+        sync: false                 # optional; rules-only classification works without it
+      - key: ENABLE_LLM_CLASSIFICATION
+        value: "true"
+      - key: GROQ_MODEL
+        value: "openai/gpt-oss-120b"
+      # "*" allows the Vercel frontend origin to call the API. Tighten this to
+      # your exact frontend URL later (e.g. https://app.vercel.app) if desired.
+      - key: CORS_ORIGINS
+        value: "*"
+      # Sample dataset lives inside backend/sample_data, so "Load sample dataset"
+      # and first-boot auto-seeding work without any volume mounts.
+      - key: SEED_DATASET_PATH
+        value: sample_data/NYC Restaurant Co. - Raw Transactions.xlsx
+      - key: SAMPLE_DATASET_PATH
+        value: sample_data/NYC Restaurant Co. - Raw Transactions.xlsx

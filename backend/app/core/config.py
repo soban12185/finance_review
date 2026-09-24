@@ -90,6 +90,16 @@ class Settings(BaseSettings):
             return [o.strip() for o in v.split(",") if o.strip()]
         return v
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _normalize_database_scheme(cls, v: str) -> str:
+        """Force the psycopg driver scheme so provider URLs (Postgres provider,
+        Render, Neon - all ``postgresql://``) resolve, e.g.
+        ``postgresql://...`` -> ``postgresql+psycopg://...``."""
+        if isinstance(v, str) and v.startswith("postgresql://"):
+            return "postgresql+psycopg" + v[len("postgresql"):]
+        return v
+
     @field_validator("groq_base_url", mode="after")
     @classmethod
     def _normalize_groq_base_url(cls, v: str) -> str:
