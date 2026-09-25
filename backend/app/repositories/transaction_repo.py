@@ -162,6 +162,37 @@ def signed_total_by_pnl_type(db: Session, month: str, pnl_type: str) -> tuple[in
     return int(total_cents or 0), int(count or 0)
 
 
+def monthly_classified_totals(db: Session) -> list[tuple]:
+    """One query: signed cents + count per (date, pnl_type, category) across all months.
+
+    Rolled up by month in Python so the dashboard avoids per-month recomputation.
+    Uses the same join and filters as ``signed_total_by_pnl_type`` and
+    ``category_totals_for_month`` so totals are identical.
+    """
+    rows = (
+        db.query(
+            Transaction.date,
+            Classification.pnl_type,
+            Classification.category_code,
+            Classification.category_name,
+            func.sum(Transaction.amount_cents),
+            func.count(Transaction.id),
+        )
+        .join(Classification, Classification.transaction_id == Transaction.id)
+        .group_by(
+            Transaction.date,
+            Classification.pnl_type,
+            Classification.category_code,
+            Classification.category_name,
+        )
+        .all()
+    )
+    return [
+        (d, pnl_type, cat_code, cat_name, int(total or 0), int(cnt or 0))
+        for d, pnl_type, cat_code, cat_name, total, cnt in rows
+    ]
+
+
 def pending_review_count(db: Session) -> int:
     return (
         db.query(func.count(Classification.id))

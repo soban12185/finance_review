@@ -1,4 +1,5 @@
 """API endpoint tests via TestClient."""
+from app.financial import engine
 from tests.conftest import SAMPLE_ROWS, make_workbook_bytes, seed_sample_dataset
 
 
@@ -268,6 +269,31 @@ def test_dashboard_api(client):
     assert body["overview"]["lines"]["operating_profit"] is not None
     assert len(body["trend"]) >= 1
     assert body["stats"]["pending_review"] >= 1
+
+
+def test_dashboard_matches_financial_engine(client):
+    """Dashboard aggregates must equal the authoritative per-row P&L engine."""
+    seed_sample_dataset_from_client(client)
+    body = client.get("/api/dashboard").json()
+
+    with api_session(client) as db:
+        for entry in body["trend"]:
+            m = entry["month"]
+            expected = engine.calculate_monthly_pnl(db, m)
+            assert entry["revenue_cents"] == expected.lines["revenue"].amount_cents
+            assert entry["cogs_cents"] == expected.lines["cogs"].amount_cents
+            assert entry["gross_profit_cents"] == expected.lines["gross_profit"].amount_cents
+            assert entry["operating_profit_cents"] == expected.lines["operating_profit"].amount_cents
+            assert entry["payroll_cents"] == expected.lines["payroll"].amount_cents
+            assert entry["operating_expenses_cents"] == expected.lines["operating_expenses"].amount_cents
+
+        assert body["overview"]["lines"] == {
+            line: lt.amount_cents
+            for line, lt in engine.calculate_monthly_pnl(db, body["selected_month"]).lines.items()
+        }
+        assert body["overview"]["net_cash_cents"] == engine.calculate_monthly_pnl(
+            db, body["selected_month"]
+        ).net_cash_cents
 
 
 def test_analyst_chat_graceful_without_key(client):

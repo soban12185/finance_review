@@ -1,13 +1,49 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
+from app.core.constants import PnlType
 from app.db.session import get_db
 from app.financial import engine
 from app.financial.money import cents_to_amount
-from app.models.transaction import Transaction
 from app.repositories import transaction_repo as repo
 
 router = APIRouter()
+
+_LINE_BY_PNL_TYPE = {
+    PnlType.REVENUE.value: "revenue",
+    PnlType.COGS.value: "cogs",
+    PnlType.PAYROLL.value: "payroll",
+    PnlType.OPERATING_EXPENSE.value: "operating_expenses",
+}
+
+_EXPENSE_BUCKETS = (
+    (PnlType.OPERATING_EXPENSE.value, "Operating Expenses"),
+    (PnlType.PAYROLL.value, "Payroll"),
+)
+
+
+def _month_lines(totals: dict[str, tuple[int, int]]) -> dict[str, tuple[int, int]]:
+    """Build the six P&L lines (cents, count) for a month from per-type totals.
+
+    Uses the same arithmetic primitives as ``engine.calculate_monthly_pnl`` so
+    every figure is identical to the per-row calculation.
+    """
+    revenue, rev_count = totals.get("revenue", (0, 0))
+    cogs, cogs_count = totals.get("cogs", (0, 0))
+    payroll, payroll_count = totals.get("payroll", (0, 0))
+    opex, opex_count = totals.get("operating_expenses", (0, 0))
+
+    gp = engine.calculate_gross_profit(revenue, cogs)
+    op = engine.calculate_operating_profit(gp, payroll, opex)
+
+    return {
+        "revenue": (revenue, rev_count),
+        "cogs": (cogs, cogs_count),
+        "gross_profit": (gp, rev_count + cogs_count),
+        "payroll": (payroll, payroll_count),
+        "operating_expenses": (opex, opex_count),
+        "operating_profit": (op, rev_count + cogs_count + payroll_count + opex_count),
+    }
 
 
 @router.get("")
@@ -15,62 +51,69 @@ def dashboard(
     month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     db: Session = Depends(get_db),
 ):
-    months = repo.available_months(db)
     aggregate = repo.available_months_agg(db)
+    agg_by_month = {e["month"]: e for e in aggregate}
+    months = [e["month"] for e in aggregate]
     selected = month or (months[0] if months else None)
+
+    lines_by_month: dict[str, dict[str, tuple[int, int]]] = {}
+    categories_by_month: dict[str, dict[str, dict[tuple[str, str], tuple[int, int]]]] = {}
+    for d, pnl_type, cat_code, cat_name, cents, cnt in repo.monthly_classified_totals(db):
+        if d is None:
+            continue
+        m = d.strftime("%Y-%m")
+        line = _LINE_BY_PNL_TYPE.get(pnl_type)
+        if line is None:
+            continue
+        month_lines = lines_by_month.setdefault(m, {})
+        cur_cents, cur_cnt = month_lines.get(line, (0, 0))
+        month_lines[line] = (cur_cents + cents, cur_cnt + cnt)
+        bucket = categories_by_month.setdefault(m, {}).setdefault(pnl_type, {})
+        key = (cat_code, cat_name)
+        cat_cents, cat_cnt = bucket.get(key, (0, 0))
+        bucket[key] = (cat_cents + cents, cat_cnt + cnt)
 
     overview = {}
     if selected:
-        pnl = engine.calculate_monthly_pnl(db, selected)
+        agg = agg_by_month[selected]
+        month_lines = _month_lines(lines_by_month.get(selected, {}))
         overview = {
             "month": selected,
-            "lines": {line: lt.amount_cents for line, lt in pnl.lines.items()},
-            "amounts": {line: cents_to_amount(lt.amount_cents) for line, lt in pnl.lines.items()},
-            "transaction_count": pnl.transaction_count,
-            "net_cash_cents": pnl.net_cash_cents,
-            "net_cash": pnl.net_cash,
-            "pending_review_count": pnl.pending_review_count,
+            "lines": {line: v[0] for line, v in month_lines.items()},
+            "amounts": {line: cents_to_amount(v[0]) for line, v in month_lines.items()},
+            "transaction_count": sum(v[1] for v in month_lines.values()),
+            "net_cash_cents": agg["net_cash_cents"],
+            "net_cash": cents_to_amount(agg["net_cash_cents"]),
+            "pending_review_count": repo.pending_review_for_month(db, selected),
         }
 
-    # Revenue / operating profit trend per month
     trend = []
     for m in months:
-        p = engine.calculate_monthly_pnl(db, m)
+        ml = _month_lines(lines_by_month.get(m, {}))
         trend.append({
             "month": m,
-            "revenue_cents": p.lines["revenue"].amount_cents,
-            "cogs_cents": p.lines["cogs"].amount_cents,
-            "gross_profit_cents": p.lines["gross_profit"].amount_cents,
-            "operating_profit_cents": p.lines["operating_profit"].amount_cents,
-            "payroll_cents": p.lines["payroll"].amount_cents,
-            "operating_expenses_cents": p.lines["operating_expenses"].amount_cents,
+            "revenue_cents": ml["revenue"][0],
+            "cogs_cents": ml["cogs"][0],
+            "gross_profit_cents": ml["gross_profit"][0],
+            "operating_profit_cents": ml["operating_profit"][0],
+            "payroll_cents": ml["payroll"][0],
+            "operating_expenses_cents": ml["operating_expenses"][0],
         })
 
-    # Expense mix by category for the selected month
     expense_mix = []
     if selected:
-        ops = engine._line_total(db, selected, "operating_expenses", "operating_expense")
-        payroll_lt = engine._line_total(db, selected, "payroll", "payroll")
-        for c in ops.categories:
-            expense_mix.append({
-                "category_code": c.category_code,
-                "category_name": c.category_name,
-                "amount_cents": c.amount_cents,
-                "amount": c.amount,
-                "bucket": "Operating Expenses",
-            })
-        for c in payroll_lt.categories:
-            expense_mix.append({
-                "category_code": c.category_code,
-                "category_name": c.category_name,
-                "amount_cents": c.amount_cents,
-                "amount": c.amount,
-                "bucket": "Payroll",
-            })
+        for pnl_type, label in _EXPENSE_BUCKETS:
+            bucket = categories_by_month.get(selected, {}).get(pnl_type, {})
+            for (cat_code, cat_name), (cat_cents, _count) in bucket.items():
+                expense_mix.append({
+                    "category_code": cat_code,
+                    "category_name": cat_name,
+                    "amount_cents": cat_cents,
+                    "amount": cents_to_amount(cat_cents),
+                    "bucket": label,
+                })
         expense_mix.sort(key=lambda x: -abs(x["amount_cents"]))
 
-    total_txns = db.query(Transaction).count()
-    pending = repo.pending_review_count(db)
     return {
         "selected_month": selected,
         "months": aggregate,
@@ -78,8 +121,8 @@ def dashboard(
         "trend": trend,
         "expense_mix": expense_mix,
         "stats": {
-            "total_transactions": total_txns,
-            "pending_review": pending,
+            "total_transactions": sum(e["transaction_count"] for e in aggregate),
+            "pending_review": repo.pending_review_count(db),
             "categories_in_use": len(repo.categories_with_counts(db)),
         },
     }
