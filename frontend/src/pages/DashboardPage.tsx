@@ -5,7 +5,7 @@ import { Card, CardHeader } from "../components/Card";
 import ImportCard from "../components/ImportCard";
 import { KpiCard, MonthSelector, StateBadge } from "../components/ui";
 import { api, API_BASE } from "../lib/api";
-import { monthLabel, money } from "../lib/format";
+import { monthLabel, monthShortLabel, money } from "../lib/format";
 import type { DashboardData } from "../lib/types";
 
 function AmountTooltip({ active, payload }: { active?: boolean; payload?: { name: string; value: number }[] }) {
@@ -17,6 +17,45 @@ function AmountTooltip({ active, payload }: { active?: boolean; payload?: { name
           <span className="text-slate-300">{p.name}</span>
           <span className="font-medium tabular-nums">{money(p.value)}</span>
         </div>
+      ))}
+    </div>
+  );
+}
+
+function TrendTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: { name: string; value: number; color?: string }[];
+  label?: string;
+}) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="bg-slate-900/95 text-white text-xs rounded-lg px-3.5 py-2.5 shadow-xl ring-1 ring-white/10 min-w-[11rem]">
+      {label ? <div className="mb-1.5 font-semibold text-slate-100 border-b border-white/10 pb-1.5">{monthLabel(label)}</div> : null}
+      {payload.map((p) => (
+        <div key={p.name} className="flex items-center justify-between gap-4 mt-1">
+          <span className="flex items-center gap-1.5 text-slate-300">
+            <span className="w-2 h-2 rounded-full" style={{ background: p.color }} />
+            {p.name}
+          </span>
+          <span className="font-medium tabular-nums">{money(p.value)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TrendLegend({ items }: { items: { color: string; label: string }[] }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-1 px-5 pt-3">
+      {items.map((it) => (
+        <span key={it.label} className="flex items-center gap-1.5 text-xs font-medium text-slate-600">
+          <span className="w-3.5 h-0.5 rounded-full" style={{ background: it.color }} />
+          {it.label}
+        </span>
       ))}
     </div>
   );
@@ -266,12 +305,27 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
         <Card className="xl:col-span-3">
-          <CardHeader title="Monthly trend" subtitle="Revenue, gross profit and operating profit across loaded months" />
-          <div className="h-72 px-3 py-4">
+          <CardHeader
+            title="Monthly Financial Trend"
+            subtitle="Revenue, gross profit and operating profit across loaded months"
+          />
+          <TrendLegend
+            items={[
+              { color: "#10b981", label: "Revenue" },
+              { color: "#6366f1", label: "Gross Profit" },
+              { color: "#f59e0b", label: "Operating Profit" },
+            ]}
+          />
+          <div className="h-72 px-3 pt-2 pb-4">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={trend} margin={{ top: 5, right: 20, bottom: 0, left: 10 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="name" tick={{ fontSize: 12 }} tickFormatter={(v: string) => monthLabel(v).slice(0, 3)} />
+              <LineChart data={trend} margin={{ top: 8, right: 24, bottom: 4, left: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                <XAxis
+                  dataKey="name"
+                  tick={{ fontSize: 12 }}
+                  tickMargin={8}
+                  tickFormatter={(v: string) => monthShortLabel(v)}
+                />
                 <YAxis
                   tick={{ fontSize: 12 }}
                   width={70}
@@ -280,10 +334,15 @@ export default function DashboardPage() {
                   ticks={trendAxisRange.ticks}
                   tickFormatter={(v: number) => `$${Math.round(v / 100000)}k`}
                 />
-                <Tooltip content={<AmountTooltip />} />
-                <Line type="monotone" dataKey="Revenue" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="Gross profit" stroke="#6366f1" strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="Operating profit" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+                <Tooltip
+                  content={<TrendTooltip />}
+                  cursor={{ stroke: "#cbd5e1", strokeWidth: 1, strokeDasharray: "4 4" }}
+                  allowEscapeViewBox={{ x: true, y: true }}
+                  wrapperStyle={{ zIndex: 100, outline: "none" }}
+                />
+                <Line type="monotone" dataKey="Revenue" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 4 }} />
+                <Line type="monotone" dataKey="Gross profit" stroke="#6366f1" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 4 }} />
+                <Line type="monotone" dataKey="Operating profit" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 4 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>

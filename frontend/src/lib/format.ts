@@ -85,3 +85,11 @@ export function monthLabel(month: string): string {
   const date = new Date(y, (m ?? 1) - 1, 1);
   return date.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 }
+
+export function monthShortLabel(month: string): string {
+  if (!month) return "";
+  const [y, m] = month.split("-").map(Number);
+  if (Number.isNaN(y) || Number.isNaN(m)) return "";
+  const date = new Date(y, m - 1, 1);
+  return date.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+}
