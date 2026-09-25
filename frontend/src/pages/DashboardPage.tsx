@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardHeader } from "../components/Card";
@@ -61,6 +61,12 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
 
+  const [expenseMonth, setExpenseMonth] = useState<string>("");
+  const [expenseData, setExpenseData] = useState<DashboardData["expense_mix"] | null>(null);
+  const [expenseLoading, setExpenseLoading] = useState(false);
+  const [expenseError, setExpenseError] = useState<string | null>(null);
+  const expenseReq = useRef(0);
+
   useEffect(() => {
     api
       .dashboard(month || undefined)
@@ -70,6 +76,36 @@ export default function DashboardPage() {
       })
       .catch((e: Error) => setError(e.message));
   }, [month, reload]);
+
+  useEffect(() => {
+    if (!data) return;
+    if (!expenseMonth) {
+      const initial = data.selected_month || data.months[0]?.month || "";
+      if (initial) {
+        setExpenseMonth(initial);
+        setExpenseData(data.expense_mix);
+      }
+    }
+  }, [data, expenseMonth]);
+
+  useEffect(() => {
+    if (!expenseMonth) return;
+    const id = ++expenseReq.current;
+    setExpenseLoading(true);
+    setExpenseError(null);
+    api
+      .dashboard(expenseMonth)
+      .then((d) => {
+        if (expenseReq.current !== id) return;
+        setExpenseData(d.expense_mix);
+        setExpenseLoading(false);
+      })
+      .catch((e: Error) => {
+        if (expenseReq.current !== id) return;
+        setExpenseError(e.message);
+        setExpenseLoading(false);
+      });
+  }, [expenseMonth]);
 
   function onImported() {
     setMonth("");
@@ -96,12 +132,12 @@ export default function DashboardPage() {
   );
   const expenseMix = useMemo(
     () =>
-      data?.expense_mix.map((e) => ({
+      expenseData?.map((e) => ({
         name: e.category_name,
         amount: Math.abs(e.amount),
         bucket: e.bucket,
       })) ?? [],
-    [data],
+    [expenseData],
   );
 
   const overview = data?.overview;
@@ -255,16 +291,23 @@ export default function DashboardPage() {
 
         <Card className="xl:col-span-2">
           <CardHeader
-            title={`Expense mix · ${monthLabel(month)}`}
+            title={`Expense mix · ${monthLabel(expenseMonth || data.selected_month || "")}`}
             subtitle="Payroll and operating expenses by category"
             right={
-              <Link to="/variance" className="text-xs text-indigo-600 hover:underline">
-                variance →
-              </Link>
+              <div className="flex items-center gap-2">
+                <MonthSelector months={months} value={expenseMonth} onChange={setExpenseMonth} />
+                <Link to={`/variance?month=${expenseMonth}`} className="text-xs text-indigo-600 hover:underline">
+                  variance →
+                </Link>
+              </div>
             }
           />
           <div className="h-72 px-4 py-4">
-            {expenseMix.length === 0 ? (
+            {expenseLoading || !expenseMonth ? (
+              <div className="flex items-center justify-center h-full text-sm text-slate-400">Loading month…</div>
+            ) : expenseError ? (
+              <div className="text-sm text-red-600 py-6">Failed to load monthly expenses: {expenseError}</div>
+            ) : expenseMix.length === 0 ? (
               <div className="text-sm text-slate-400">No expenses for this month.</div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">

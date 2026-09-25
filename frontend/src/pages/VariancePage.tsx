@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Card, CardHeader } from "../components/Card";
 import { MonthSelector, VerificationBadge } from "../components/ui";
 import { api } from "../lib/api";
@@ -7,6 +7,8 @@ import { formatPercent, money, monthLabel } from "../lib/format";
 import type { VarianceDriverReport, VarianceReport } from "../lib/types";
 
 export default function VariancePage() {
+  const [searchParams] = useSearchParams();
+  const urlMonth = (searchParams.get("month") ?? "").trim();
   const [months, setMonths] = useState<string[]>([]);
   const [monthA, setMonthA] = useState("");
   const [monthB, setMonthB] = useState("");
@@ -20,16 +22,21 @@ export default function VariancePage() {
   }, []);
 
   useEffect(() => {
-    if (months.length) {
-      if (months.length >= 2) {
-        setMonthA(months[months.length - 2]);
-        setMonthB(months[months.length - 1]);
-      } else {
-        setMonthA(months[0]);
-        setMonthB(months[0]);
-      }
+    if (!months.length) return;
+    if (months.includes(urlMonth)) {
+      const a = months[Math.max(0, months.indexOf(urlMonth) - 1)] || urlMonth;
+      setMonthA(a);
+      setMonthB(urlMonth);
+      return;
     }
-  }, [months]);
+    if (months.length >= 2) {
+      setMonthA(months[months.length - 2]);
+      setMonthB(months[months.length - 1]);
+    } else {
+      setMonthA(months[0]);
+      setMonthB(months[0]);
+    }
+  }, [months, urlMonth]);
 
   useEffect(() => {
     if (!monthA || !monthB) return;
