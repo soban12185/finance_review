@@ -22,6 +22,39 @@ function AmountTooltip({ active, payload }: { active?: boolean; payload?: { name
   );
 }
 
+const TREND_DOLLAR_STEPS = [250, 500, 1000, 2500, 5000, 10000, 20000, 25000, 50000, 100000, 250000];
+
+function trendAxis(
+  valuesCents: number[],
+): { domain: [number, number]; ticks: number[] } {
+  const minCents = Math.min(0, ...valuesCents);
+  const maxCents = Math.max(0, ...valuesCents);
+  if (maxCents === 0 && minCents === 0) {
+    return { domain: [0, 2000000], ticks: [0, 2000000] };
+  }
+
+  const spanDollars = (maxCents - minCents) / 100;
+  let step = TREND_DOLLAR_STEPS[TREND_DOLLAR_STEPS.length - 1];
+  for (const s of TREND_DOLLAR_STEPS) {
+    if (spanDollars / s <= 8) {
+      step = s;
+      break;
+    }
+  }
+  while (spanDollars / step < 3 && step > TREND_DOLLAR_STEPS[0]) {
+    step = TREND_DOLLAR_STEPS[TREND_DOLLAR_STEPS.indexOf(step) - 1];
+  }
+
+  const stepCents = step * 100;
+  const lo = Math.min(0, Math.floor(minCents / stepCents) * stepCents);
+  const hi = Math.max(stepCents, Math.ceil(maxCents / stepCents) * stepCents);
+  const ticks: number[] = [];
+  for (let v = lo; v <= hi + 0.5; v += stepCents) {
+    ticks.push(Math.round(v));
+  }
+  return { domain: [lo, hi], ticks };
+}
+
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [month, setMonth] = useState<string>("");
@@ -53,6 +86,13 @@ export default function DashboardPage() {
         "Operating profit": t.operating_profit_cents,
       })) ?? [],
     [data],
+  );
+  const trendAxisRange = useMemo(
+    () =>
+      trendAxis(
+        trend.flatMap((t) => [t.Revenue, t["Gross profit"], t["Operating profit"]]),
+      ),
+    [trend],
   );
   const expenseMix = useMemo(
     () =>
@@ -196,7 +236,14 @@ export default function DashboardPage() {
               <LineChart data={trend} margin={{ top: 5, right: 20, bottom: 0, left: 10 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis dataKey="name" tick={{ fontSize: 12 }} tickFormatter={(v: string) => monthLabel(v).slice(0, 3)} />
-                <YAxis tick={{ fontSize: 12 }} tickFormatter={(v: number) => `$${Math.round(v / 1000)}k`} width={70} />
+                <YAxis
+                  tick={{ fontSize: 12 }}
+                  width={70}
+                  type="number"
+                  domain={trendAxisRange.domain}
+                  ticks={trendAxisRange.ticks}
+                  tickFormatter={(v: number) => `$${Math.round(v / 100000)}k`}
+                />
                 <Tooltip content={<AmountTooltip />} />
                 <Line type="monotone" dataKey="Revenue" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
                 <Line type="monotone" dataKey="Gross profit" stroke="#6366f1" strokeWidth={2} dot={{ r: 3 }} />
